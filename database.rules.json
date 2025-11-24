@@ -1,0 +1,18 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "equipment_items": {
+      ".indexOn": ["categoryId"]
+    },
+    "borrow_requests": {
+      ".indexOn": ["adviserId", "userId", "status", "requestedAt"]
+    },
+    "equipment": {
+      ".indexOn": ["category", "status", "laboratory"]
+    },
+    "users": {
+      ".indexOn": ["email", "role"]
+    }
+  }
+}

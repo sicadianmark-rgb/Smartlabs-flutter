@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1025540647070",
+    "project_id": "smartlab-e2107",
+    "storage_bucket": "smartlab-e2107.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1025540647070:android:410e53820c12b86ec9738f",
+        "android_client_info": {
+          "package_name": "com.example.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6pXh0wrPfOz6z0cy8iRm9dYkEjR3ptQ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1025540647070:android:f862411e5a533875c9738f",
+        "android_client_info": {
+          "package_name": "com.example.smartlab"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6pXh0wrPfOz6z0cy8iRm9dYkEjR3ptQ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

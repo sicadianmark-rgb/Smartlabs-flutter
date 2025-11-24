@@ -1,0 +1,28 @@
+{
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "smartlab-e2107",
+          "appId": "1:1025540647070:android:410e53820c12b86ec9738f",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "smartlab-e2107",
+          "configurations": {
+            "android": "1:1025540647070:android:410e53820c12b86ec9738f",
+            "ios": "1:1025540647070:ios:48daf25efd621969c9738f",
+            "macos": "1:1025540647070:ios:48daf25efd621969c9738f",
+            "web": "1:1025540647070:web:af708cc3962933eac9738f",
+            "windows": "1:1025540647070:web:b4aaee05799d60b9c9738f"
+          }
+        }
+      }
+    }
+  }
+}
