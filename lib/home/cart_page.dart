@@ -325,7 +325,7 @@ class _CartPageState extends State<CartPage> {
                         ),
                       ),
                       child: const Text(
-                        'Proceed to Checkout',
+                        'Submit Borrow Request',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
