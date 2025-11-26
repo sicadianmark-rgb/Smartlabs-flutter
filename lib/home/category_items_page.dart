@@ -384,7 +384,7 @@ class _CategoryItemsPageState extends State<CategoryItemsPage> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('$quantity x ${item.name} added to cart'),
-                      duration: const Duration(seconds: 2),
+                      duration: const Duration(milliseconds: 1500),
                       action: SnackBarAction(
                         label: 'View Cart',
                         onPressed: () {

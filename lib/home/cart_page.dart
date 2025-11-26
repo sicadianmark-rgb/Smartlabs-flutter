@@ -105,7 +105,7 @@ class _CartPageState extends State<CartPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('$itemName added to cart'),
-            duration: const Duration(seconds: 2),
+            duration: const Duration(milliseconds: 1500),
             backgroundColor: const Color(0xFF2AA39F),
           ),
         );
