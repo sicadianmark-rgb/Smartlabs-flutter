@@ -15,13 +15,7 @@ class BorrowHistoryService {
     Map<dynamic, dynamic> requestData,
   ) async {
     try {
-      // Only archive batch requests (those with batchId)
-      final batchId = requestData['batchId'] as String?;
-      if (batchId == null) {
-        // Individual requests don't need to be archived for association rules
-        return;
-      }
-
+      // Archive all requests (both individual and batch)
       // Create history entry with timestamp
       final historyData = Map<String, dynamic>.from(requestData);
       historyData['archivedAt'] = DateTime.now().toIso8601String();
@@ -48,13 +42,19 @@ class BorrowHistoryService {
     Map<dynamic, dynamic> requestData,
   ) async {
     try {
-      final batchId = requestData['batchId'] as String?;
-      if (batchId == null) return;
-
+      // Archive all requests (both individual and batch)
       // Update existing history entry or create new one
       final historyData = Map<String, dynamic>.from(requestData);
       historyData['archivedAt'] = DateTime.now().toIso8601String();
       historyData['originalRequestId'] = requestId;
+
+      // Debug: Log what data is being archived
+      debugPrint('🔄 ARCHIVING RETURNED REQUEST: $requestId');
+      debugPrint('   UserId: ${historyData['userId']}');
+      debugPrint('   AdviserId: ${historyData['adviserId']}');
+      debugPrint('   ItemName: ${historyData['itemName']}');
+      debugPrint('   Status: ${historyData['status']}');
+      debugPrint('   ReturnedAt: ${historyData['returnedAt']}');
 
       // Check if already exists in history (from approval)
       final historySnapshot = await _database
@@ -105,15 +105,10 @@ class BorrowHistoryService {
         final requestId = entry.key;
         final requestData = entry.value as Map<dynamic, dynamic>;
         final status = requestData['status'] as String?;
-        final batchId = requestData['batchId'] as String?;
 
-        // Only migrate approved/returned batch requests
-        if (batchId == null) {
-          skipped++;
-          continue;
-        }
-
-        if (status == 'approved' || status == 'returned') {
+        // Migrate all returned requests (not approved ones)
+        // Approved requests should only be migrated when they become returned
+        if (status == 'returned') {
           // Check if already in history
           final historySnapshot = await _database
               .ref()
@@ -125,6 +120,11 @@ class BorrowHistoryService {
             final historyData = Map<String, dynamic>.from(requestData);
             historyData['archivedAt'] = DateTime.now().toIso8601String();
             historyData['originalRequestId'] = requestId;
+            
+            // Ensure returnedAt is set for returned items
+            if (historyData['returnedAt'] == null || historyData['returnedAt'] == '') {
+              historyData['returnedAt'] = requestData['processedAt'] ?? DateTime.now().toIso8601String();
+            }
 
             await _database
                 .ref()
@@ -185,6 +185,60 @@ class BorrowHistoryService {
       debugPrint('❌ Error getting historical batch patterns: $e');
       return {};
     }
+  }
+
+  /// Check if migration is needed and run it automatically
+  /// This can be called during app initialization
+  static Future<void> ensureHistoryMigration() async {
+    try {
+      // Check if there are any borrow_requests that haven't been migrated
+      final borrowRequestsSnapshot = await _database.ref().child('borrow_requests').get();
+      
+      if (!borrowRequestsSnapshot.exists) {
+        debugPrint('No borrow requests found, no migration needed');
+        return;
+      }
+      
+      final borrowRequestsData = borrowRequestsSnapshot.value as Map<dynamic, dynamic>;
+      int needsMigration = 0;
+      
+      // Check if any returned requests need migration
+      for (var entry in borrowRequestsData.entries) {
+        final requestId = entry.key;
+        final requestData = entry.value as Map<dynamic, dynamic>;
+        final status = requestData['status'] as String?;
+        
+        if (status == 'returned') {
+          // Check if already in history
+          final historySnapshot = await _database
+              .ref()
+              .child('borrow_history')
+              .child(requestId)
+              .get();
+          
+          if (!historySnapshot.exists) {
+            needsMigration++;
+          }
+        }
+      }
+      
+      // Run migration only if there are items that need it
+      if (needsMigration > 0) {
+        debugPrint('🔄 Found $needsMigration requests needing migration, running migration...');
+        await migrateExistingHistory();
+      } else {
+        debugPrint('✅ All requests already migrated, skipping migration');
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking migration status: $e');
+    }
+  }
+
+  /// Force migration of all returned requests
+  /// This can be used to manually trigger migration if needed
+  static Future<void> forceMigration() async {
+    debugPrint('🔄 Forcing migration of all returned requests...');
+    await migrateExistingHistory();
   }
 
   /// Clean up old history entries (optional, for maintenance)

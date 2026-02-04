@@ -104,10 +104,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         const ProfilePage(),
       ];
     } else if (_userRole == 'teacher') {
-      // Teacher pages: Home, Equipment, Requests, Profile
+      // Teacher pages: Home, Equipment, History, Requests, Profile
       _pages = [
         _buildHomeContent(),
         const EquipmentPage(),
+        const BorrowingHistoryPage(),
         const RequestPage(),
         const ProfilePage(),
       ];

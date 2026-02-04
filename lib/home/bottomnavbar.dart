@@ -42,7 +42,7 @@ class AppBottomNavBar extends StatelessWidget {
         ),
       ];
     } else if (userRole == 'teacher') {
-      // For teacher role, show Home, Equipment, Requests, and Profile
+      // For teacher role, show Home, Equipment, History, Requests, and Profile
       items = [
         const BottomNavigationBarItem(
           icon: Icon(Icons.home_outlined),
@@ -53,6 +53,11 @@ class AppBottomNavBar extends StatelessWidget {
           icon: Icon(Icons.science_outlined),
           activeIcon: Icon(Icons.science),
           label: 'Equipment',
+        ),
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.history_outlined),
+          activeIcon: Icon(Icons.history),
+          label: 'History',
         ),
         const BottomNavigationBarItem(
           icon: Icon(Icons.assignment_outlined),

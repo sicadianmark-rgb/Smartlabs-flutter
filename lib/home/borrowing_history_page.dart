@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'service/due_date_reminder_service.dart';
 import 'service/borrow_history_service.dart';
@@ -21,6 +21,7 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
   List<Map<String, dynamic>> _allRequests = [];
   List<Map<String, dynamic>> _currentBorrows = [];
   List<Map<String, dynamic>> _returnedItems = [];
+  List<Map<String, dynamic>> _rejectedItems = [];
   late TabController _tabController;
   Map<String, String> _requestStatuses = {};
   final Set<String> _sentReminderKeys = <String>{};
@@ -28,10 +29,19 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadBorrowingHistory();
     _setupRealtimeListener();
     _checkDueDateReminders();
+    
+    // Force immediate sync to ensure returned items have correct status
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      debugPrint('🔄 FORCE SYNC ON PAGE LOAD');
+      await _syncReturnedRequestsToHistory();
+      // Reload after sync to get updated data
+      await _loadBorrowingHistory();
+      debugPrint('✅ FORCE SYNC COMPLETED');
+    });
   }
 
   Future<void> _checkDueDateReminders() async {
@@ -43,7 +53,7 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Listen for changes to borrow_requests for this user
+    // Listen for changes to borrow_requests where user is requester - exactly like student UI
     FirebaseDatabase.instance
         .ref()
         .child('borrow_requests')
@@ -52,7 +62,7 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
         .onValue
         .listen((event) {
           if (mounted && event.snapshot.exists) {
-            unawaited(_processSnapshot(event.snapshot));
+            unawaited(_processRealtimeUpdate(event.snapshot));
           }
         });
   }
@@ -73,7 +83,12 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
         return;
       }
 
-      final snapshot =
+      // Ensure history migration is up to date
+      await BorrowHistoryService.ensureHistoryMigration();
+
+      // Load data from both borrow_requests and borrow_history
+      // For instructor UI, behave exactly like student UI - only show own requests
+      final borrowRequestsSnapshot =
           await FirebaseDatabase.instance
               .ref()
               .child('borrow_requests')
@@ -81,7 +96,15 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
               .equalTo(user.uid)
               .get();
 
-      await _processSnapshot(snapshot);
+      // For borrow_history, we need to get all data and filter client-side
+      // since userId might not be indexed in the history collection
+      final borrowHistorySnapshot =
+          await FirebaseDatabase.instance
+              .ref()
+              .child('borrow_history')
+              .get();
+
+      await _processSnapshots(borrowRequestsSnapshot, borrowHistorySnapshot, user.uid);
 
       setState(() {
         _isLoading = false;
@@ -92,16 +115,157 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
     }
   }
 
-  Future<void> _processSnapshot(DataSnapshot snapshot) async {
-    List<Map<String, dynamic>> userRequests = [];
+  Future<void> _processRealtimeUpdate(DataSnapshot snapshot) async {
+    // For real-time updates, we only need to reload the full data
+    // This ensures consistency between current and historical data
+    await _loadBorrowingHistory();
+    
+    // Also check for returned requests that need to be synced to history
+    await _syncReturnedRequestsToHistory();
+  }
+
+  Future<void> _syncReturnedRequestsToHistory() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      debugPrint('🔄 STARTING SYNC OF RETURNED REQUESTS TO HISTORY');
+      
+      // Get all requests where user is the requester - exactly like student UI
+      final borrowRequestsSnapshot =
+          await FirebaseDatabase.instance
+              .ref()
+              .child('borrow_requests')
+              .orderByChild('userId')
+              .equalTo(user.uid)
+              .get();
+
+      if (!borrowRequestsSnapshot.exists) {
+        debugPrint('📭 No borrow requests found');
+        return;
+      }
+
+      final data = borrowRequestsSnapshot.value as Map<dynamic, dynamic>;
+      int syncedCount = 0;
+      int updatedCount = 0;
+      
+      debugPrint('🔄 PROCESSING ${data.length} REQUESTS FOR SYNC');
+      
+      for (var entry in data.entries) {
+        final requestId = entry.key.toString();
+        final requestData = entry.value as Map<dynamic, dynamic>;
+        
+        // Check if this request is from the current user - exactly like student UI
+        final userId = requestData['userId']?.toString();
+        
+        if (userId != user.uid) continue;
+        
+        // Check if request is returned but not properly in history
+        final status = requestData['status']?.toString();
+        final returnedAt = requestData['returnedAt']?.toString();
+        
+        debugPrint('🔍 CHECKING REQUEST: $requestId - Status: $status - ReturnedAt: $returnedAt');
+        
+        // AGGRESSIVE: Include if returned OR has returnedAt OR is in history but should be returned
+        final needsSync = (status == 'returned') || 
+                         (returnedAt != null && returnedAt != '') ||
+                         (status == 'approved' && returnedAt != null && returnedAt != '') ||
+                         (status == 'released' && returnedAt != null && returnedAt != '');
+        
+        debugPrint('   Needs sync: $needsSync (status=$status, returnedAt=$returnedAt)');
+        
+        if (needsSync) {
+          // Check if this returned request exists in history
+          final historySnapshot = await FirebaseDatabase.instance
+              .ref()
+              .child('borrow_history')
+              .child(requestId)
+              .get();
+          
+          if (!historySnapshot.exists) {
+            // Archive this returned request to history
+            debugPrint('🔄 CREATING NEW HISTORY ENTRY FOR RETURNED REQUEST: $requestId');
+            final historyData = Map<String, dynamic>.from(requestData);
+            historyData['archivedAt'] = DateTime.now().toIso8601String();
+            historyData['originalRequestId'] = requestId;
+            
+            await FirebaseDatabase.instance
+                .ref()
+                .child('borrow_history')
+                .child(requestId)
+                .set(historyData);
+            
+            syncedCount++;
+            debugPrint('✅ Created history entry for returned request: $requestId');
+          } else {
+            // ALWAYS update existing history entry with returned status and timestamp
+            // NO CONDITIONS - always force update to ensure consistency
+            debugPrint('🔄 FORCE UPDATING EXISTING HISTORY ENTRY: $requestId');
+            final historyData = historySnapshot.value as Map<dynamic, dynamic>;
+            final currentHistoryStatus = historyData['status']?.toString();
+            final currentHistoryReturnedAt = historyData['returnedAt']?.toString();
+            
+            debugPrint('   Current history status: "$currentHistoryStatus"');
+            debugPrint('   Current history returnedAt: "$currentHistoryReturnedAt"');
+            debugPrint('   New status from borrow_requests: "$status"');
+            debugPrint('   New returnedAt from borrow_requests: "$returnedAt"');
+            
+            final updateData = Map<String, dynamic>.from(requestData);
+            updateData['archivedAt'] = DateTime.now().toIso8601String();
+            // ALWAYS FORCE the status to be 'returned' and ensure returnedAt is set
+            updateData['status'] = 'returned';
+            updateData['returnedAt'] = returnedAt;
+            
+            debugPrint('   FORCING update:');
+            debugPrint('     Old status: $currentHistoryStatus');
+            debugPrint('     New status: ${updateData['status']}');
+            debugPrint('     Old returnedAt: $currentHistoryReturnedAt');
+            debugPrint('     New returnedAt: ${updateData['returnedAt']}');
+            
+            await FirebaseDatabase.instance
+                .ref()
+                .child('borrow_history')
+                .child(requestId)
+                .update(updateData);
+            
+            updatedCount++;
+            debugPrint('✅ FORCE UPDATED history entry: $requestId');
+            debugPrint('   Forced status to: returned');
+            debugPrint('   Set returnedAt to: $returnedAt');
+            debugPrint('   Previous status was: $currentHistoryStatus');
+          }
+        }
+      }
+      
+      debugPrint('📊 SYNC SUMMARY: Created $syncedCount new entries, Updated $updatedCount existing entries');
+      
+      // Reload history if we made any changes
+      if (syncedCount > 0 || updatedCount > 0) {
+        debugPrint('🔄 RELOADING HISTORY AFTER SYNC');
+        await _loadBorrowingHistory();
+      }
+    } catch (e) {
+      debugPrint('❌ Error syncing returned requests to history: $e');
+    }
+  }
+
+  Future<void> _processSnapshots(
+    DataSnapshot userRequestsSnapshot,
+    DataSnapshot borrowHistorySnapshot,
+    String userId,
+  ) async {
+    List<Map<String, dynamic>> allUserRequests = [];
     final List<Map<String, dynamic>> newlyApprovedRequests = [];
     final List<Map<String, dynamic>> newlyReleasedRequests = [];
 
-    if (snapshot.exists) {
-      final data = snapshot.value as Map<dynamic, dynamic>;
+    // Process user's own requests (where they are the requester) - exactly like student UI
+    if (userRequestsSnapshot.exists) {
+      final data = userRequestsSnapshot.value as Map<dynamic, dynamic>;
       data.forEach((key, value) {
         final request = Map<String, dynamic>.from(value);
         request['id'] = key;
+        request['dataSource'] = 'borrow_requests';
+        request['requestType'] = 'own'; // Mark as own request
         // Ensure status field exists, default to pending if missing
         if (!request.containsKey('status') || request['status'] == null) {
           request['status'] = 'pending';
@@ -118,41 +282,281 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
             currentStatus == 'released') {
           newlyReleasedRequests.add(request);
         }
-        userRequests.add(request);
+        allUserRequests.add(request);
       });
-
-      userRequests.sort(
-        (a, b) =>
-            b['requestedAt'].toString().compareTo(a['requestedAt'].toString()),
-      );
     }
 
-    setState(() {
-      _allRequests = userRequests;
-      _currentBorrows =
-          userRequests
-              .where(
-                (r) =>
-                    (r['status'] == 'approved' || r['status'] == 'released') &&
-                    (r['returnedAt'] == null || r['returnedAt'] == ''),
-              )
-              .toList();
-      _returnedItems =
-          userRequests
-              .where(
-                (r) =>
-                    (r['status'] == 'returned') ||
-                    (r['status'] == 'approved' &&
-                        r['returnedAt'] != null &&
-                        r['returnedAt'] != ''),
-              )
-              .toList();
+    // Process historical borrow requests - exactly like student UI
+    if (borrowHistorySnapshot.exists) {
+      final data = borrowHistorySnapshot.value as Map<dynamic, dynamic>;
+      data.forEach((key, value) {
+        final request = Map<String, dynamic>.from(value);
+        // Filter by userId only (like student UI)
+        if (request['userId'] == userId) {
+          request['id'] = key;
+          request['dataSource'] = 'borrow_history';
+          request['requestType'] = 'own'; // Mark as own request
+          // Ensure status field exists
+          if (!request.containsKey('status') || request['status'] == null) {
+            request['status'] = 'returned'; // Default to returned for historical items
+          }
+          allUserRequests.add(request);
+        }
+      });
+    }
+
+    // Remove duplicates - prefer history entries over current requests for returned items
+    final Map<String, Map<String, dynamic>> uniqueRequests = {};
+    for (var request in allUserRequests) {
+      final requestId = request['id']?.toString() ?? '';
+      if (requestId.isEmpty) continue;
+      
+      // If this request already exists, decide which one to keep
+      if (uniqueRequests.containsKey(requestId)) {
+        final existing = uniqueRequests[requestId]!;
+        final existingStatus = existing['status']?.toString() ?? '';
+        final newStatus = request['status']?.toString() ?? '';
+        
+        // Prefer the entry with more recent status information
+        // History entries (borrow_history) are preferred for returned items
+        // Current requests (borrow_requests) are preferred for active items
+        if (request['dataSource'] == 'borrow_history' && newStatus == 'returned') {
+          uniqueRequests[requestId] = request;
+        } else if (existing['dataSource'] == 'borrow_history' && existingStatus == 'returned') {
+          // Keep existing history entry
+        } else if (request['dataSource'] == 'borrow_requests' && 
+                   (newStatus == 'pending' || newStatus == 'approved' || newStatus == 'released')) {
+          uniqueRequests[requestId] = request;
+        }
+      } else {
+        uniqueRequests[requestId] = request;
+      }
+    }
+    
+    // Convert back to list
+    allUserRequests = uniqueRequests.values.toList();
+
+    // Debug: Log deduplication results
+    debugPrint('🔍 DEDUPLICATION RESULTS:');
+    debugPrint('   Total unique requests: ${uniqueRequests.length}');
+    for (var entry in uniqueRequests.entries) {
+      final request = entry.value;
+      debugPrint('   ${entry.key}: ${request['itemName']} - Status: ${request['status']} - Source: ${request['dataSource']}');
+    }
+
+    // Sort all requests by date (newest first)
+    allUserRequests.sort(
+      (a, b) {
+        final aDate = a['requestedAt']?.toString() ?? a['archivedAt']?.toString() ?? '';
+        final bDate = b['requestedAt']?.toString() ?? b['archivedAt']?.toString() ?? '';
+        return bDate.compareTo(aDate);
+      },
+    );
+
+      // Debug: Print all raw data first
+      debugPrint('📊 Total allUserRequests: ${allUserRequests.length}');
+      debugPrint('🔍 User ID: $userId');
+      debugPrint('🔍 DETAILED RAW DATA ANALYSIS:');
+      for (var item in allUserRequests) {
+        final status = item['status']?.toString();
+        final returnedAt = item['returnedAt']?.toString();
+        final dataSource = item['dataSource']?.toString();
+        final itemName = item['itemName']?.toString();
+        
+        debugPrint('📋 ITEM: $itemName');
+        debugPrint('   Status: "$status"');
+        debugPrint('   ReturnedAt: "$returnedAt"');
+        debugPrint('   DataSource: "$dataSource"');
+        debugPrint('   Status == returned: ${status == 'returned'}');
+        debugPrint('   Has returnedAt: ${returnedAt != null && returnedAt != ''}');
+        debugPrint('   Is history with returnedAt: ${dataSource == 'borrow_history' && returnedAt != null && returnedAt != ''}');
+        debugPrint('   Is request with returnedAt: ${dataSource == 'borrow_requests' && returnedAt != null && returnedAt != ''}');
+        debugPrint('   ---');
+      }
+
+      setState(() {
+        // Debug: Show what we're working with
+        debugPrint('🔍 DEBUGGING: Total items before filtering: ${allUserRequests.length}');
+        debugPrint('🔍 DETAILED ITEM ANALYSIS:');
+        for (var item in allUserRequests) {
+          final status = item['status']?.toString();
+          final returnedAt = item['returnedAt']?.toString();
+          final dataSource = item['dataSource']?.toString();
+          final itemName = item['itemName']?.toString();
+          final requestId = item['id']?.toString();
+          
+          debugPrint('📋 ITEM: $itemName (ID: $requestId)');
+          debugPrint('   Status: "$status"');
+          debugPrint('   DataSource: "$dataSource"');
+          debugPrint('   ReturnedAt: "$returnedAt"');
+          debugPrint('   Will show in CURRENT: ${status == 'pending' || status == 'approved' || status == 'released'}');
+          debugPrint('   Will show in RETURNED: ${status == 'returned'}');
+          debugPrint('   ---');
+        }
+
+        // CURRENT: Only items from borrow_requests that are truly active (exactly like admin panel)
+        debugPrint('🔄 CURRENT TAB FILTERING (EXACTLY LIKE ADMIN PANEL):');
+        _currentBorrows = [];
+        for (var r in allUserRequests) {
+          final status = r['status']?.toString();
+          final itemName = r['itemName']?.toString();
+          final dataSource = r['dataSource']?.toString();
+          final returnedAt = r['returnedAt']?.toString();
+          
+          // Only include items from borrow_requests that are active (no returnedAt)
+          // This exactly matches what admin panel sees
+          final isCurrentActive = (dataSource == 'borrow_requests') &&
+                                 (returnedAt == null || returnedAt == '') &&
+                                 (status == 'pending' || status == 'approved' || status == 'released');
+          
+          debugPrint('🔍 CHECKING: $itemName');
+          debugPrint('   Status: "$status"');
+          debugPrint('   DataSource: "$dataSource"');
+          debugPrint('   ReturnedAt: "$returnedAt"');
+          debugPrint('   Is current active (like admin): $isCurrentActive');
+          
+          if (isCurrentActive) {
+            _currentBorrows.add(r);
+            debugPrint('   ✅ INCLUDED in CURRENT (active request)');
+          } else {
+            debugPrint('   ❌ EXCLUDED from CURRENT');
+            if (dataSource != 'borrow_requests') {
+              debugPrint('   Reason: From history, not active requests');
+            } else if (returnedAt != null && returnedAt != '') {
+              debugPrint('   Reason: Has returnedAt - already returned');
+            } else if (status != 'pending' && status != 'approved' && status != 'released') {
+              debugPrint('   Reason: Status is $status - not active');
+            }
+          }
+          debugPrint('   ---');
+        }
+
+        // RETURNED: Show ALL items that could possibly be returned (aggressive approach)
+        debugPrint('🔄 RETURNED TAB FILTERING (AGGRESSIVE - SHOW ALL RETURNED):');
+        _returnedItems = [];
+        for (var r in allUserRequests) {
+          final status = r['status']?.toString();
+          final itemName = r['itemName']?.toString();
+          final dataSource = r['dataSource']?.toString();
+          final returnedAt = r['returnedAt']?.toString();
+          
+          // AGGRESSIVE: Include if ANY of these conditions are true
+          final isReturned = (status == 'returned') ||                           // Status is returned
+                            (returnedAt != null && returnedAt != '') ||           // Has returnedAt timestamp
+                            (dataSource == 'borrow_history' && status != 'pending' && status != 'rejected'); // History items that aren't pending/rejected
+          
+          debugPrint('🔍 CHECKING: $itemName');
+          debugPrint('   Status: "$status"');
+          debugPrint('   DataSource: "$dataSource"');
+          debugPrint('   ReturnedAt: "$returnedAt"');
+          debugPrint('   Is returned (aggressive): $isReturned');
+          
+          if (isReturned) {
+            _returnedItems.add(r);
+            debugPrint('   ✅ INCLUDED in RETURNED');
+          } else {
+            debugPrint('   ❌ EXCLUDED from RETURNED');
+          }
+          debugPrint('   ---');
+        }
+
+        // REJECTED: Items with status = 'rejected'
+        _rejectedItems = allUserRequests
+            .where((r) => r['status'] == 'rejected')
+            .toList();
+
+        // ALL = CURRENT + RETURNED + REJECTED
+        _allRequests = [];
+        _allRequests.addAll(_currentBorrows);
+        _allRequests.addAll(_returnedItems);
+        _allRequests.addAll(_rejectedItems);
+
+        debugPrint('🔊 RESULTS:');
+        debugPrint('   Current items: ${_currentBorrows.length}');
+        debugPrint('   Returned items: ${_returnedItems.length}');
+        debugPrint('   Rejected items: ${_rejectedItems.length}');
+        debugPrint('   All items: ${_allRequests.length}');
+        
+        // Debug: Show actual status of returned items
+        debugPrint('🔍 RETURNED ITEMS STATUS CHECK:');
+        for (var item in _returnedItems) {
+          debugPrint('   ${item['itemName']}: Status = "${item['status']}", ReturnedAt = "${item['returnedAt']}", Source = ${item['dataSource']}');
+        }
+
+        // Debug: Find items that left CURRENT but didn't reach RETURNED
+        debugPrint('🔍 Checking for items that left CURRENT but might not be in RETURNED:');
+        for (var item in allUserRequests) {
+          final isInCurrent = _currentBorrows.contains(item);
+          final isInReturned = _returnedItems.contains(item);
+          final hasReturnedAt = item['returnedAt'] != null && item['returnedAt'] != '';
+          final status = item['status']?.toString().toLowerCase();
+          
+          if (!isInCurrent && !isInReturned) {
+            debugPrint('⚠️ ITEM NOT IN EITHER TAB: ${item['itemName']}');
+            debugPrint('   Status: ${item['status']} - Source: ${item['dataSource']} - ReturnedAt: ${item['returnedAt']}');
+            debugPrint('   Has returnedAt: $hasReturnedAt - Status lowercase: $status');
+          }
+          
+          if (hasReturnedAt && !isInReturned) {
+            debugPrint('❌ HAS returnedAt BUT NOT IN RETURNED: ${item['itemName']}');
+            debugPrint('   Status: ${item['status']} - Source: ${item['dataSource']} - ReturnedAt: ${item['returnedAt']}');
+          }
+        }
+
+        // Debug: Check for duplicates in returned items
+        debugPrint('🔍 Checking for duplicates in returned items:');
+        final Map<String, List<Map<String, dynamic>>> duplicateCheck = {};
+        for (var item in _returnedItems) {
+          final itemId = item['id']?.toString() ?? '';
+          if (itemId.isNotEmpty) {
+            duplicateCheck.putIfAbsent(itemId, () => []).add(item);
+          }
+        }
+        
+        for (var entry in duplicateCheck.entries) {
+          if (entry.value.length > 1) {
+            debugPrint('🔄 DUPLICATE FOUND: ${entry.key} - Count: ${entry.value.length}');
+            for (var item in entry.value) {
+              debugPrint('   - ${item['itemName']} - Source: ${item['dataSource']} - Status: ${item['status']}');
+            }
+          }
+        }
+
+        // Sort all requests by date (newest first)
+        _allRequests.sort(
+          (a, b) {
+            final aDate = a['requestedAt']?.toString() ?? a['archivedAt']?.toString() ?? '';
+            final bDate = b['requestedAt']?.toString() ?? b['archivedAt']?.toString() ?? '';
+            return bDate.compareTo(aDate);
+          },
+        );
+        
+        // Debug: Detailed tracking of CURRENT to RETURNED flow
+        debugPrint('🔍 Current items (PENDING/APPROVED/RELEASED): ${_currentBorrows.length}');
+        for (var item in _currentBorrows) {
+          debugPrint('📋 CURRENT: ${item['itemName']} - Status: ${item['status']} - Source: ${item['dataSource']} - ReturnedAt: ${item['returnedAt']}');
+        }
+        
+        debugPrint('🔄 Returned items (status = returned): ${_returnedItems.length}');
+        for (var item in _returnedItems) {
+          debugPrint('📋 RETURNED: ${item['itemName']} - Status: ${item['status']} - Source: ${item['dataSource']} - ReturnedAt: ${item['returnedAt']}');
+        }
+        
+        debugPrint('📊 ALL items (CURRENT + RETURNED): ${_allRequests.length}');
+      
+      // Debug: Check for items that should be returned but aren't showing
+      debugPrint('🔍 Checking for items with returned status that might be missed:');
+      for (var item in allUserRequests) {
+        if (item['status'] == 'returned' && !_returnedItems.contains(item)) {
+          debugPrint('❌ MISSED RETURNED: ${item['itemName']} - Status: ${item['status']} - Source: ${item['dataSource']}');
+        }
+      }
       _requestStatuses = {
-        for (final request in userRequests)
+        for (final request in allUserRequests)
           if (request['id'] != null)
             request['id'].toString(): request['status']?.toString() ?? 'pending',
       };
-    });
+      });
 
     await _notifyApprovedRequests(newlyApprovedRequests);
     await _notifyReleasedRequests(newlyReleasedRequests);
@@ -315,6 +719,65 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
       } catch (e) {
         debugPrint('Error notifying release: $e');
       }
+    }
+  }
+
+  Future<void> _deleteRequest(String requestId, String itemName) async {
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Request'),
+          content: Text('Are you sure you want to delete the request for "$itemName"? This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE74C3C),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Delete from borrow_requests
+      await FirebaseDatabase.instance
+          .ref()
+          .child('borrow_requests')
+          .child(requestId)
+          .remove();
+
+      // Delete from borrow_history if it exists
+      await FirebaseDatabase.instance
+          .ref()
+          .child('borrow_history')
+          .child(requestId)
+          .remove();
+
+      // Delete from user's borrow_requests subcollection
+      await FirebaseDatabase.instance
+          .ref()
+          .child('users')
+          .child(user.uid)
+          .child('borrow_requests')
+          .child(requestId)
+          .remove();
+
+      _showSnackBar('Request deleted successfully!', isError: false);
+      _loadBorrowingHistory();
+    } catch (e) {
+      _showSnackBar('Error deleting request: $e', isError: true);
     }
   }
 
@@ -531,6 +994,15 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
                     ),
                   ),
                 ),
+                Tab(
+                  child: Text(
+                    'Rejected (${_rejectedItems.length})',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -566,8 +1038,15 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
                   ),
                   child: IconButton(
                     icon: const Icon(Icons.refresh, color: Color(0xFF2AA39F)),
-                    onPressed: _loadBorrowingHistory,
-                    tooltip: 'Refresh history',
+                    onPressed: () async {
+                      debugPrint('🔄 MANUAL REFRESH AND SYNC TRIGGERED');
+                      await _loadBorrowingHistory();
+                      await _syncReturnedRequestsToHistory();
+                      // Force reload again after sync
+                      await _loadBorrowingHistory();
+                      debugPrint('✅ MANUAL SYNC COMPLETED');
+                    },
+                    tooltip: 'Refresh history and sync returned items',
                   ),
                 ),
               ],
@@ -594,8 +1073,9 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
                   controller: _tabController,
                   children: [
                     _buildRequestsList(_allRequests, showReturnButton: false),
-                    _buildRequestsList(_currentBorrows, showReturnButton: true),
-                    _buildRequestsList(_returnedItems, showReturnButton: false),
+                    _buildRequestsList(_currentBorrows, showReturnButton: false),
+                    _buildRequestsList(_returnedItems, showReturnButton: false, showDeleteButton: true),
+                    _buildRequestsList(_rejectedItems, showReturnButton: false),
                   ],
                 ),
               ),
@@ -607,6 +1087,7 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
   Widget _buildRequestsList(
     List<Map<String, dynamic>> requests, {
     bool showReturnButton = false,
+    bool showDeleteButton = false,
   }) {
     if (requests.isEmpty) {
       return Center(
@@ -654,7 +1135,7 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
       itemCount: requests.length,
       itemBuilder: (context, index) {
         final request = requests[index];
-        return _buildRequestCard(request, showReturnButton: showReturnButton);
+        return _buildRequestCard(request, showReturnButton: showReturnButton, showDeleteButton: showDeleteButton);
       },
     );
   }
@@ -662,13 +1143,24 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
   Widget _buildRequestCard(
     Map<String, dynamic> request, {
     bool showReturnButton = false,
+    bool showDeleteButton = false,
   }) {
     final requestDate =
-        request['requestedAt'] != null
-            ? DateFormat(
-              'MMM dd, yyyy - hh:mm a',
-            ).format(DateTime.parse(request['requestedAt']))
-            : 'Unknown Date';
+        DateFormat('MMM dd, yyyy - hh:mm a').format(
+            DateTime.parse(request['requestedAt']),
+        );
+
+    final status = request['status']?.toString() ?? 'pending';
+    final returnedAt = request['returnedAt']?.toString();
+    
+    // Check if this item is in the RETURNED tab and force status to "Returned"
+    final isInReturnedTab = _returnedItems.contains(request);
+    final displayStatus = isInReturnedTab ? 'returned' : status;
+    
+    debugPrint('🎨 Building card for: ${request['itemName']}');
+    debugPrint('   Original status: $status');
+    debugPrint('   Is in returned tab: $isInReturnedTab');
+    debugPrint('   Display status: $displayStatus');
 
     final dateToBeUsed =
         request['dateToBeUsed'] != null
@@ -691,7 +1183,6 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
             ).format(DateTime.parse(request['returnedAt']))
             : null;
 
-    final status = request['status'] ?? 'pending';
     final itemName = request['itemName'] ?? 'Unknown Item';
     final categoryName = request['categoryName'] ?? 'Unknown Category';
     final laboratory = request['laboratory'] ?? 'Not specified';
@@ -702,7 +1193,8 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
     IconData statusIcon;
     String statusText;
 
-    switch (status) {
+    // Use displayStatus instead of original status
+    switch (displayStatus) {
       case 'approved':
         statusColor = const Color(0xFF27AE60);
         statusIcon = Icons.check_circle;
@@ -818,6 +1310,26 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
                   label: const Text('Mark as Returned'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF3498DB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+
+            if (showDeleteButton) ...[
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _deleteRequest(request['id'], request['itemName']),
+                  icon: const Icon(Icons.delete, size: 18),
+                  label: const Text('Delete'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE74C3C),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(

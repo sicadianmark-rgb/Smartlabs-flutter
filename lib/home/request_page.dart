@@ -15,15 +15,16 @@ class RequestPage extends StatefulWidget {
 class _RequestPageState extends State<RequestPage>
     with SingleTickerProviderStateMixin {
   bool _isLoading = true;
-  List<Map<String, dynamic>> _pendingRequests = [];
-  List<Map<String, dynamic>> _approvedRequests = [];
+  List<Map<String, dynamic>> _allRequests = [];
+  List<Map<String, dynamic>> _currentRequests = [];
+  List<Map<String, dynamic>> _returnedRequests = [];
   List<Map<String, dynamic>> _rejectedRequests = [];
   late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _loadAdviserRequestsOnly();
   }
 
@@ -91,7 +92,10 @@ class _RequestPageState extends State<RequestPage>
           if (userId != null) {
             request['userName'] = studentNames[userId] ?? 'Unknown Student';
           }
-          adviserRequests.add(request);
+          // Exclude instructor's own requests since they get auto-approved
+          if (userId != user.uid) {
+            adviserRequests.add(request);
+          }
         });
 
         adviserRequests.sort(
@@ -102,12 +106,29 @@ class _RequestPageState extends State<RequestPage>
       }
 
       setState(() {
-        _pendingRequests =
-            adviserRequests.where((r) => r['status'] == 'pending').toList();
-        _approvedRequests =
-            adviserRequests.where((r) => r['status'] == 'approved').toList();
-        _rejectedRequests =
-            adviserRequests.where((r) => r['status'] == 'rejected').toList();
+        // CURRENT: Only PENDING requests (approved requests are removed from instructor view)
+        _currentRequests =
+            adviserRequests
+                .where(
+                  (r) =>
+                    r['status'] == 'pending' &&
+                    (r['returnedAt'] == null || r['returnedAt'] == ''),
+                )
+                .toList();
+
+        // ALL = CURRENT (only pending requests for instructor approval)
+        _allRequests = [];
+        _allRequests.addAll(_currentRequests);
+
+        // Sort all requests by date (newest first)
+        _allRequests.sort(
+          (a, b) {
+            final aDate = a['requestedAt']?.toString() ?? '';
+            final bDate = b['requestedAt']?.toString() ?? '';
+            return bDate.compareTo(aDate);
+          },
+        );
+
         _isLoading = false;
       });
     } catch (e) {
@@ -168,6 +189,42 @@ class _RequestPageState extends State<RequestPage>
             fullRequestData,
           ),
         );
+      } else if (status == 'returned') {
+        // When admin marks as returned, archive to history and update quantity
+        final fullRequestData = Map<String, dynamic>.from(request);
+        fullRequestData.addAll(updateData);
+        fullRequestData['returnedAt'] = DateTime.now().toIso8601String();
+        
+        updates.add(
+          BorrowHistoryService.archiveReturnedRequest(
+            requestId,
+            fullRequestData,
+          ),
+        );
+        
+        // Decrement quantity_borrowed if the request was approved/released
+        final requestSnapshot =
+            await FirebaseDatabase.instance
+                .ref()
+                .child('borrow_requests')
+                .child(requestId)
+                .get();
+
+        if (requestSnapshot.exists) {
+          final requestData = requestSnapshot.value as Map<dynamic, dynamic>;
+          final previousStatus = requestData['status'] as String?;
+          
+          if (previousStatus == 'approved' || previousStatus == 'released') {
+            updates.add(
+              _updateEquipmentQuantityBorrowed(
+                request['itemId'],
+                request['categoryId'],
+                request['quantity'],
+                increment: false,
+              ),
+            );
+          }
+        }
       } else if (status == 'rejected') {
         // If request was previously approved or released and now rejected, 
         // we need to check if quantity was already decreased
@@ -385,7 +442,7 @@ class _RequestPageState extends State<RequestPage>
             tabs: [
               Tab(
                 child: Text(
-                  'Pending (${_pendingRequests.length})',
+                  'All (${_allRequests.length})',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -394,16 +451,7 @@ class _RequestPageState extends State<RequestPage>
               ),
               Tab(
                 child: Text(
-                  'Approved (${_approvedRequests.length})',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Tab(
-                child: Text(
-                  'Rejected (${_rejectedRequests.length})',
+                  'Current (${_currentRequests.length})',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -476,9 +524,8 @@ class _RequestPageState extends State<RequestPage>
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  _buildRequestsList(_pendingRequests, showActions: true),
-                  _buildRequestsList(_approvedRequests),
-                  _buildRequestsList(_rejectedRequests),
+                  _buildRequestsList(_allRequests, showActions: false),
+                  _buildRequestsList(_currentRequests, showActions: true),
                 ],
               ),
             ),
@@ -714,6 +761,31 @@ class _RequestPageState extends State<RequestPage>
                   return Column(
                     children: [
                       const SizedBox(height: 20),
+                      // Show "Mark as Returned" button for approved/released requests
+                      if (request['status'] == 'approved' || request['status'] == 'released') ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed:
+                                () => _updateRequestStatus(
+                                  request['id'],
+                                  'returned',
+                                  request,
+                                ),
+                            icon: const Icon(Icons.assignment_turned_in, size: 18),
+                            label: const Text('Mark as Returned'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF3498DB),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       Row(
                         children: [
                           Expanded(
