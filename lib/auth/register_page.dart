@@ -188,7 +188,7 @@ class _RegisterPageState extends State<RegisterPage> {
           _buildInputField(
             label: 'Email address',
             controller: _emailController,
-            hintText: 'Your email',
+            hintText: 'your.email@dnsc.edu.ph',
             keyboardType: TextInputType.emailAddress,
             validator: (value) {
               if (value!.isEmpty) return 'Please enter your email';
@@ -196,6 +196,9 @@ class _RegisterPageState extends State<RegisterPage> {
                 r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
               ).hasMatch(value)) {
                 return 'Please enter a valid email';
+              }
+              if (!value.endsWith('@dnsc.edu.ph')) {
+                return 'Only @dnsc.edu.ph email addresses are allowed';
               }
               return null;
             },

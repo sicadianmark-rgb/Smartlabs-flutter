@@ -35,6 +35,23 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+    // Validate email format and domain
+    if (!RegExp(
+      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+    ).hasMatch(emailController.text.trim())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email')),
+      );
+      return;
+    }
+
+    if (!emailController.text.trim().endsWith('@dnsc.edu.ph')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Only @dnsc.edu.ph email addresses are allowed')),
+      );
+      return;
+    }
+
     setState(() => isLoading = true);
 
     try {
@@ -419,6 +436,23 @@ class _LoginPageState extends State<LoginPage> {
                   if (resetEmailController.text.trim().isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Please enter your email')),
+                    );
+                    return;
+                  }
+
+                  // Validate email format and domain
+                  if (!RegExp(
+                    r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                  ).hasMatch(resetEmailController.text.trim())) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter a valid email')),
+                    );
+                    return;
+                  }
+
+                  if (!resetEmailController.text.trim().endsWith('@dnsc.edu.ph')) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Only @dnsc.edu.ph email addresses are allowed')),
                     );
                     return;
                   }
