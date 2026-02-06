@@ -152,6 +152,15 @@ class EquipmentItem {
   }
 
   factory EquipmentItem.fromMap(String id, Map<dynamic, dynamic> data) {
+    String? description;
+    final dynamic rawDescription = data['description'] ?? data['notes'] ?? data['note'];
+    if (rawDescription != null) {
+      final String normalized = rawDescription.toString().trim();
+      if (normalized.isNotEmpty) {
+        description = normalized;
+      }
+    }
+
     // Parse quantity_borrowed (can be int, string, or null)
     int? quantityBorrowed;
     if (data['quantity_borrowed'] != null) {
@@ -167,7 +176,7 @@ class EquipmentItem {
       name: data['name'] ?? 'Unknown Item',
       status: data['status'] ?? 'Available',
       categoryId: data['categoryId'] ?? '',
-      description: data['description'],
+      description: description,
       quantity: data['quantity']?.toString() ?? '1',
       quantityBorrowed: quantityBorrowed,
       model: data['model'],

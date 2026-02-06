@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'dart:typed_data';
 import 'package:app/home/models/equipment_models.dart';
 import 'package:app/home/service/equipment_service.dart';
 import 'package:app/home/service/cart_service.dart';
@@ -148,32 +146,42 @@ class _CategoryItemsPageState extends State<CategoryItemsPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
-                                child: Text(
-                                  item.name,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.name,
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (item.model != null && item.model!.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        item.model!,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey.shade600,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                               IconButton(
-                                onPressed: () => _showImageDialog(item),
+                                onPressed: () => _showDescriptionDialog(item),
                                 icon: const Icon(Icons.visibility),
                                 color: const Color(0xFF2AA39F),
-                                tooltip: 'View Image',
+                                tooltip: 'View Notes',
                               ),
                             ],
                           ),
                           if (item.description != null &&
                               item.description!.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            Text(
-                              item.description!,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
+                            const SizedBox.shrink(),
                           ],
                           const SizedBox(height: 12),
                           Row(
@@ -409,228 +417,111 @@ class _CategoryItemsPageState extends State<CategoryItemsPage> {
     );
   }
 
-  void _showImageDialog(EquipmentItem item) {
-    // Check if item has an image
-    if (item.imageUrl == null || item.imageUrl!.isEmpty) {
-      // Show "No image" dialog
-      showDialog(
-        context: context,
-        builder:
-            (context) => Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.image_not_supported_outlined,
-                      size: 64,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      item.name,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No image uploaded',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey.shade600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2AA39F),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 32,
-                          vertical: 12,
-                        ),
-                      ),
-                      child: const Text('Close'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-      );
-      return;
-    }
-
-    // Show image dialog
+  void _showDescriptionDialog(EquipmentItem item) {
     showDialog(
       context: context,
-      builder:
-          (context) => Dialog(
-            backgroundColor: Colors.transparent,
-            child: Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.9,
-                maxWidth: MediaQuery.of(context).size.width * 0.9,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with title and close button
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Header
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.name,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              if (item.model != null && item.model!.isNotEmpty)
-                                Text(
-                                  'Model: ${item.model}',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                            ],
+                        Text(
+                          item.name,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.close),
-                        ),
+                        if (item.model != null && item.model!.isNotEmpty)
+                          Text(
+                            'Model: ${item.model}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
                       ],
                     ),
                   ),
-                  const Divider(height: 1),
-                  // Image content
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      child: _buildImageWidget(item.imageUrl!),
-                    ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
                   ),
                 ],
               ),
-            ),
-          ),
-    );
-  }
-
-  Widget _buildImageWidget(String imageUrl) {
-    try {
-      // Check if it's a base64 data URL
-      if (imageUrl.startsWith('data:image')) {
-        // Extract the base64 part
-        final base64String = imageUrl.split(',').last;
-
-        // Decode base64 to Uint8List
-        final Uint8List bytes = base64.decode(base64String);
-
-        return Center(
-          child: InteractiveViewer(
-            child: Image.memory(
-              bytes,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                return Center(
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 16),
+              // Description content
+              if (item.description != null && item.description!.isNotEmpty) ...[
+                Text(
+                  'Notes',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  item.description!,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey.shade700,
+                    height: 1.5,
+                  ),
+                ),
+              ] else ...[
+                Center(
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        Icons.error_outline,
+                        Icons.note_outlined,
                         size: 48,
-                        color: Colors.red.shade300,
+                        color: Colors.grey.shade400,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       Text(
-                        'Failed to load image',
-                        style: TextStyle(color: Colors.red.shade700),
+                        'No Description available',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-        );
-      } else {
-        // Assume it's a regular URL
-        return Center(
-          child: InteractiveViewer(
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit.contain,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return Center(
-                  child: CircularProgressIndicator(
-                    value:
-                        loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded /
-                                loadingProgress.expectedTotalBytes!
-                            : null,
+                ),
+              ],
+              const SizedBox(height: 24),
+              // Close button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2AA39F),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                );
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 48,
-                        color: Colors.red.shade300,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Failed to load image',
-                        style: TextStyle(color: Colors.red.shade700),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
           ),
-        );
-      }
-    } catch (e) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red.shade300),
-            const SizedBox(height: 16),
-            Text(
-              'Error: $e',
-              style: TextStyle(color: Colors.red.shade700),
-              textAlign: TextAlign.center,
-            ),
-          ],
         ),
-      );
-    }
+      ),
+    );
   }
 }
