@@ -280,6 +280,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     _currentIndex = 2;
                   });
                 },
+                onNavigateToRequests: () {
+                  if (!mounted) return;
+                  // Only show Requests navigation for teachers
+                  if (_userRole == 'teacher') {
+                    setState(() {
+                      _initPages();
+                      _currentIndex = 3; // Requests tab for teachers
+                    });
+                  }
+                },
               );
               // Refresh notification count after opening modal
               _loadNotificationCount();
