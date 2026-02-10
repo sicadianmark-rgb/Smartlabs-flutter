@@ -52,8 +52,8 @@ class DueDateReminderService {
         final itemName = request['itemName'] as String?;
         final requestId = entry.key as String;
 
-        // Only check active borrows (approved or released, not returned)
-        if (status != 'approved' && status != 'released') continue;
+        // Only check active borrows that are released (not returned)
+        if (status != 'released') continue;
         if (request['returnedAt'] != null && request['returnedAt'] != '') continue;
         if (dateToReturn == null || itemName == null) continue;
 

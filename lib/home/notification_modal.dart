@@ -35,23 +35,30 @@ class _NotificationModalState extends State<NotificationModal> {
         return;
       }
 
+      List<NotificationItem> notifications = [];
+
       // Load user-specific notifications
       final snapshot =
           await FirebaseDatabase.instance
               .ref()
               .child('notifications')
               .child(user.uid)
-              .orderByChild('timestamp')
               .get();
-
-      List<NotificationItem> notifications = [];
 
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
+        debugPrint('Found ${data.length} user notifications for user ${user.uid}');
         data.forEach((key, value) {
-          final notificationData = value as Map<dynamic, dynamic>;
-          notifications.add(NotificationItem.fromMap(key, notificationData));
+          // Skip invalid data that's not a Map
+          if (value is Map<dynamic, dynamic>) {
+            final notificationData = value;
+            notifications.add(NotificationItem.fromMap(key, notificationData));
+          } else {
+            debugPrint('Skipping invalid notification data: key=$key, value=$value (${value.runtimeType})');
+          }
         });
+      } else {
+        debugPrint('No user notifications found for user ${user.uid}');
       }
 
       // Add system notifications (announcements, maintenance, etc.)
@@ -59,6 +66,8 @@ class _NotificationModalState extends State<NotificationModal> {
 
       // Sort by timestamp (newest first)
       notifications.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+      debugPrint('Total notifications to display: ${notifications.length}');
 
       setState(() {
         _notifications = notifications;
@@ -79,15 +88,22 @@ class _NotificationModalState extends State<NotificationModal> {
           await FirebaseDatabase.instance
               .ref()
               .child('system_notifications')
-              .orderByChild('timestamp')
               .get();
 
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
+        debugPrint('Found ${data.length} system notifications');
         data.forEach((key, value) {
-          final notificationData = value as Map<dynamic, dynamic>;
-          notifications.add(NotificationItem.fromMap(key, notificationData));
+          // Skip invalid data that's not a Map
+          if (value is Map<dynamic, dynamic>) {
+            final notificationData = value;
+            notifications.add(NotificationItem.fromMap(key, notificationData));
+          } else {
+            debugPrint('Skipping invalid system notification data: key=$key, value=$value (${value.runtimeType})');
+          }
         });
+      } else {
+        debugPrint('No system notifications found');
       }
     } catch (e) {
       debugPrint('Error loading system notifications: $e');

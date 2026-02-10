@@ -3,6 +3,7 @@ import 'package:app/home/bottomnavbar.dart';
 import 'package:app/home/notification_modal.dart';
 import 'package:app/home/service/notification_service.dart';
 import 'package:app/home/service/due_date_reminder_service.dart';
+import 'package:app/services/notification_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -150,6 +151,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           });
         }
         _initPages(); // Initialize pages after loading user data
+        
+        // Subscribe to notifications based on user role
+        _subscribeToNotifications();
       } else {
         if (mounted) {
           setState(() => _isLoading = false);
@@ -175,6 +179,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
     } catch (e) {
       debugPrint('Error loading notification count: $e');
+    }
+  }
+
+  /// Subscribe to notifications based on user role
+  Future<void> _subscribeToNotifications() async {
+    try {
+      final notificationManager = NotificationManager();
+      
+      // Subscribe all users to basic notifications
+      await notificationManager.subscribeToSmartlabNotifications();
+      
+      debugPrint('Subscribed to notifications for role: $_userRole');
+    } catch (e) {
+      debugPrint('Error subscribing to notifications: $e');
     }
   }
 

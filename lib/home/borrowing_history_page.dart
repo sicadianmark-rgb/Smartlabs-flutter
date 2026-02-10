@@ -1231,8 +1231,8 @@ class _BorrowingHistoryPageState extends State<BorrowingHistoryPage>
             const Divider(color: Color(0xFFEAEAEA)),
             const SizedBox(height: 12),
 
-            // Due Date Warning (only for active borrows)
-            if (showReturnButton && (status == 'approved' || status == 'released')) ...[
+            // Due Date Warning (only for released items)
+            if (showReturnButton && status == 'released') ...[
               _buildDueDateWarning(request['dateToReturn']),
               const SizedBox(height: 12),
             ],

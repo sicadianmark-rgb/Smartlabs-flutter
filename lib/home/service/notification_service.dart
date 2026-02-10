@@ -221,7 +221,22 @@ class NotificationService {
 
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
-        return data.length;
+        int unreadCount = 0;
+        data.forEach((key, value) {
+          // Only count actual notification objects, not boolean values
+          if (value is Map<dynamic, dynamic>) {
+            final isRead = value['isRead'];
+            if (isRead == null || isRead == false) {
+              unreadCount++;
+            }
+          } else {
+            debugPrint('Skipping invalid notification in count: key=$key, value=$value (${value.runtimeType})');
+          }
+        });
+        debugPrint('getUnreadCount: Found $unreadCount unread notifications for user ${user.uid}');
+        return unreadCount;
+      } else {
+        debugPrint('getUnreadCount: No unread notifications found for user ${user.uid}');
       }
 
       return 0;
