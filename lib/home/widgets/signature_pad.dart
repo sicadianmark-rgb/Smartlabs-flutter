@@ -190,7 +190,7 @@ class _SignaturePadState extends State<SignaturePad> {
                   child: ElevatedButton.icon(
                     onPressed: _submitSignature,
                     icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Confirm & Submit'),
+                    label: const Text('Confirm'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2AA39F),
                       foregroundColor: Colors.white,
