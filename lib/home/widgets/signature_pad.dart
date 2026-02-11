@@ -96,10 +96,39 @@ class _SignaturePadState extends State<SignaturePad> {
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final isTablet = screenSize.width > 600;
+    final isLandscape = screenSize.width > screenSize.height;
+    
+    // Calculate dynamic dimensions based on screen size
+    double dialogWidth = screenSize.width * 0.9;
+    double dialogHeight = screenSize.height * 0.8;
+    
+    // Adjust for larger screens
+    if (isTablet) {
+      dialogWidth = screenSize.width * 0.7;
+      dialogHeight = screenSize.height * 0.7;
+    }
+    
+    // Adjust for landscape orientation
+    if (isLandscape) {
+      dialogHeight = screenSize.height * 0.9;
+    }
+    
+    // Ensure maximum dimensions for very large screens
+    dialogWidth = dialogWidth > 500 ? 500 : dialogWidth;
+    dialogHeight = dialogHeight > 700 ? 700 : dialogHeight;
+
     return Dialog(
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: screenSize.width * 0.05,
+        vertical: screenSize.height * 0.05,
+      ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        width: dialogWidth,
+        height: dialogHeight,
+        padding: EdgeInsets.all(screenSize.width * 0.04),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -107,66 +136,77 @@ class _SignaturePadState extends State<SignaturePad> {
               'E-Signature',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: screenSize.height * 0.01),
             Text(
               'Please sign below to confirm your request',
               style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
-            Container(
-              width: double.infinity,
-              height: 300,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: RepaintBoundary(
-                  child: GestureDetector(
-                    onPanStart: _onPanStart,
-                    onPanUpdate: _onPanUpdate,
-                    onPanEnd: _onPanEnd,
-                    child: CustomPaint(
-                      key: _canvasKey,
-                      painter: SignaturePainter(_points),
-                      size: Size.infinite,
-                      child: Container(),
+            SizedBox(height: screenSize.height * 0.02),
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: RepaintBoundary(
+                    child: GestureDetector(
+                      onPanStart: _onPanStart,
+                      onPanUpdate: _onPanUpdate,
+                      onPanEnd: _onPanEnd,
+                      child: CustomPaint(
+                        key: _canvasKey,
+                        painter: SignaturePainter(_points),
+                        size: Size.infinite,
+                        child: Container(),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: screenSize.height * 0.02),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                OutlinedButton.icon(
-                  onPressed: _clearSignature,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Clear'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _clearSignature,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Clear'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                      minimumSize: const Size.fromHeight(50),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
                   ),
                 ),
-                ElevatedButton.icon(
-                  onPressed: _submitSignature,
-                  icon: const Icon(Icons.check),
-                  label: const Text('Confirm & Submit'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2AA39F),
-                    foregroundColor: Colors.white,
+                SizedBox(width: screenSize.width * 0.03),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _submitSignature,
+                    icon: const Icon(Icons.check, size: 18),
+                    label: const Text('Confirm & Submit'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2AA39F),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(50),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () => widget.onSignatureComplete(null),
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            SizedBox(height: screenSize.height * 0.02),
+            Center(
+              child: TextButton(
+                onPressed: () => widget.onSignatureComplete(null),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
             ),
           ],
         ),
